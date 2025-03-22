@@ -12,10 +12,14 @@ const port = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// Supabase client initialization
+// Supabase client initialization with PostgreSQL connection
 const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_ANON_KEY
+  process.env.DATABASE_URL,
+  {
+    db: {
+      schema: 'public'
+    }
+  }
 );
 
 // Database connection status endpoint
@@ -157,7 +161,7 @@ const checkConnection = async () => {
       console.log('\n=== Database Connection Status ===');
       console.log('✅ Connection established successfully');
       console.log(`📡 Response time: ${responseTime}ms`);
-      console.log(`🏢 Project URL: ${process.env.SUPABASE_URL}`);
+      console.log(`🏢 Database URL: ${process.env.DATABASE_URL}`);
       console.log('===============================\n');
       isConnected = true;
       connectionAttempts = 0;
